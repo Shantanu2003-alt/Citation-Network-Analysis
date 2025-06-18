@@ -1,0 +1,80 @@
+Code for link prediction in graphs: using Logistic regression
+
+import networkx as nx
+import numpy as np
+import random
+import gzip
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import roc_auc_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+
+def load_graph(file_path, directed=True):
+    G = nx.DiGraph() if directed else nx.Graph()
+    open_func = gzip.open if file_path.endswith('.gz') else open
+    with open_func(file_path, 'rt') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            u, v = map(int, line.strip().split())
+            G.add_edge(u, v)
+    return G
+
+def generate_edge_samples(G, sample_size=10000):
+    edges = list(G.edges)
+    pos = random.sample(edges, sample_size)
+    nodes = list(G.nodes)
+    neg = set()
+    while len(neg) < sample_size:
+        u, v = random.sample(nodes, 2)
+        if not G.has_edge(u, v):
+            neg.add((u, v))
+    return pos, list(neg)
+
+def compute_features(G, edges):
+    G_u = G.to_undirected()
+    feats = []
+    for u, v in edges:
+        cn = len(list(nx.common_neighbors(G_u, u, v))) if G.has_node(u) and G.has_node(v) else 0
+        pa = G.degree(u) * G.degree(v) if G.has_node(u) and G.has_node(v) else 0
+        feats.append([cn, pa])
+    return np.array(feats)
+
+def run_pipeline(G, name):
+    pos, neg = generate_edge_samples(G)
+    X = np.vstack((compute_features(G, pos), compute_features(G, neg)))
+    y = np.hstack((np.ones(len(pos)), np.zeros(len(neg))))
+
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+
+    model = LogisticRegression(class_weight='balanced', max_iter=1000)
+    auc_scores = cross_val_score(model, X, y, cv=5, scoring='roc_auc')
+    print(f"\n--- Training {name} using Logistic regression ---")
+    print(f"Cross-Validated AUC: {np.mean(auc_scores):.4f}")
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
+
+    auc = roc_auc_score(y_test, y_prob)
+    f1 = f1_score(y_test, y_pred)
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print(f"Test AUC: {auc:.4f}")
+    print(f"Accuracy: {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall: {rec:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    print(f"Confusion Matrix:\n{cm}")
+
+G_cit = load_graph("Cit-HepPh.txt", directed=True)
+G_ca = load_graph("ca-HepPh.txt.gz", directed=False)
+
+run_pipeline(G_cit,"Citation network dataset")
+run_pipeline(G_ca,"Collaboration network dataset")

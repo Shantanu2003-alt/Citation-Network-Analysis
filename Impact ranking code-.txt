@@ -1,0 +1,161 @@
+Impact ranking code-
+
+import gzip
+import networkx as nx
+import random
+import pandas as pd
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr
+
+alpha = 0.35
+beta = 0.35
+gamma = 0.20
+delta = 0.10
+
+def load_citation_graph(paths):
+    G = nx.DiGraph()
+    for path in paths:
+        with gzip.open(path, 'rt') as f:
+            for line in f:
+                if line.startswith('#') or line.strip() == "":
+                    continue
+                src, dst = map(int, line.strip().split())
+                if src != dst:
+                    G.add_edge(src, dst)
+    return G
+
+paths = ["/content/ca-AstroPh (1).txt.gz", "/content/cit-HepTh (1) (1).txt.gz"]
+G = load_citation_graph(paths)
+citation_count = dict(G.in_degree())
+
+paper_years = {node: random.randint(1993, 2003) for node in G.nodes}
+current_year = 2003
+
+time_weighted_score = defaultdict(float)
+for citing, cited in G.edges():
+    age = current_year - paper_years.get(citing, 2003)
+    if age > 0:
+        time_weighted_score[cited] += 1 / age
+
+citation_quality_score = defaultdict(float)
+for citing, cited in G.edges():
+    citation_quality_score[cited] += citation_count.get(citing, 0)
+
+max_quality = max(citation_quality_score.values(), default=1)
+for k in citation_quality_score:
+    citation_quality_score[k] /= max_quality
+
+
+_, authorities = nx.hits(G, max_iter=1000, normalized=True)
+
+max_c = max(citation_count.values(), default=1)
+max_t = max(time_weighted_score.values(), default=1)
+max_s = max(authorities.values(), default=1)
+
+data = []
+for paper in G.nodes():
+    c = citation_count.get(paper, 0)
+    t = time_weighted_score.get(paper, 0)
+    q = citation_quality_score.get(paper, 0)
+    s = authorities.get(paper, 0)
+
+    norm_c = c / max_c if max_c > 0 else 0
+    norm_t = t / max_t if max_t > 0 else 0
+    norm_q = q
+    norm_s = s / max_s if max_s > 0 else 0
+
+    final_rank = alpha * norm_c + beta * norm_t + gamma * norm_q + delta * norm_s
+    data.append([paper, c, round(t, 4), round(q, 4), round(s, 6), round(final_rank, 4)])
+
+df = pd.DataFrame(data, columns=[
+    'PaperID', 'Citation Count', 'Time-Weighted Score', 'Quality Score', 'SALSA Rank', 'Final Rank'
+])
+df.sort_values('Final Rank', ascending=False, inplace=True)
+
+
+df['Citation_Rank'] = df['Citation Count'].rank(ascending=False)
+df['Final_Rank_Pos'] = df['Final Rank'].rank(ascending=False)
+
+spearman_corr, _ = spearmanr(df['Citation_Rank'], df['Final_Rank_Pos'])
+
+
+def mean_average_precision(true_relevant, predicted, k=10):
+    score = 0.0
+    hits = 0
+    for i, paper_id in enumerate(predicted[:k]):
+        if paper_id in true_relevant:
+            hits += 1
+            score += hits / (i + 1)
+    return score / min(len(true_relevant), k)
+
+traditional_df = df[['PaperID', 'Citation Count']].copy()
+traditional_df.sort_values('Citation Count', ascending=False, inplace=True)
+top_cited_papers = set(traditional_df.head(10)['PaperID'])
+
+top_predicted_papers = list(df.head(10)['PaperID'])
+
+map_score = mean_average_precision(top_cited_papers, top_predicted_papers, k=10)
+
+print("\n Traditional Citation-Based Ranking (Top 10 Papers):\n")
+print(traditional_df.head(10).to_string(index=False))
+
+print("\n Final Paper Ranking Summary\n")
+print("Each paper's influence is ranked based on the following metrics:\n")
+print("1. Citation Count         → Basic Influence Score")
+print("2. Time-Weighted Score    → Gives more weight to recent citations")
+print("3. Quality Score          → Importance of who is citing the paper")
+print("4. SALSA Rank (HITS)      → Importance in the network structure")
+print(f"\n Final Rank = {alpha} × Norm(Citation Count) + {beta} × Norm(Time-Weighted Score) + "
+      f"{gamma} × Norm(Quality Score) + {delta} × Norm(SALSA Rank)\n")
+
+print("Top 10 Papers Based on Final Rank:\n")
+print(df.head(10).to_string(index=False))
+
+print(f"\n Spearman’s Rank Correlation between Citation Count and Final Rank: {spearman_corr:.4f}")
+print(f"\n Mean Average Precision (MAP) @10: {map_score:.4f}")
+
+
+top_10 = df.head(10)
+
+
+plt.figure(figsize=(10, 5))
+plt.bar(top_10['PaperID'].astype(str), top_10['Citation Count'], color='steelblue')
+plt.title(" Citation Count (Basic Influence)", fontsize=14)
+plt.xlabel("Paper ID")
+plt.ylabel("Citations")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.bar(top_10['PaperID'].astype(str), top_10['Time-Weighted Score'], color='orange')
+plt.title("Time-Weighted Citation Score (Recent Influence)", fontsize=14)
+plt.xlabel("Paper ID")
+plt.ylabel("Score")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.bar(top_10['PaperID'].astype(str), top_10['Quality Score'], color='green')
+plt.title("Citation Quality Score (Influence of Citers)", fontsize=14)
+plt.xlabel("Paper ID")
+plt.ylabel("Score")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.bar(top_10['PaperID'].astype(str), top_10['Final Rank'], color='purple')
+plt.title("Final Impact Rank (Combined Score)", fontsize=14)
+plt.xlabel("Paper ID")
+plt.ylabel("Final Score")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.show() 
+

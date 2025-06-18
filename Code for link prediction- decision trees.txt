@@ -1,0 +1,66 @@
+Code for link prediction in graphs using: Decision Trees
+
+import numpy as np
+import networkx as nx
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score,
+    f1_score, confusion_matrix, roc_auc_score
+)
+
+import random
+random.seed(42)
+
+def compute_features(G, edges):
+    return np.array([
+        [len(list(nx.common_neighbors(G, u, v))), G.degree[u] * G.degree[v]]
+        for u, v in edges
+    ])
+
+def sample_edges(G, num_samples=10000):
+    edges = random.sample(list(G.edges()), num_samples)
+    nodes = list(G.nodes())
+    non_edges = set()
+
+    while len(non_edges) < num_samples:
+        u, v = random.sample(nodes, 2)
+        if u != v and not G.has_edge(u, v):
+            non_edges.add((u, v))
+    return edges, list(non_edges)
+
+def evaluate_model(model, X, y, X_test, y_test, graph_name):
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+
+    print(f"\n--- Training {graph_name} using Decision Tree ---")
+    print(f"Cross-Validated AUC: {cross_val_score(model, X, y, cv=5, scoring='roc_auc').mean():.4f}")
+    print(f"Test AUC: {roc_auc_score(y_test, y_proba):.4f}")
+    print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+    print(f"Precision: {precision_score(y_test, y_pred):.4f}")
+    print(f"Recall: {recall_score(y_test, y_pred):.4f}")
+    print(f"F1 Score: {f1_score(y_test, y_pred):.4f}")
+    print(f"Confusion Matrix:\n{confusion_matrix(y_test, y_pred)}")
+
+def link_prediction_decision_tree(G, graph_name):
+    pos_edges, neg_edges = sample_edges(G, num_samples=10000)
+
+    X = np.vstack((compute_features(G, pos_edges), compute_features(G, neg_edges)))
+    y = np.hstack((np.ones(len(pos_edges)), np.zeros(len(neg_edges))))
+
+    X = StandardScaler().fit_transform(X)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, stratify=y, random_state=42
+    )
+
+    model = DecisionTreeClassifier(class_weight='balanced', random_state=42)
+    model.fit(X_train, y_train)
+
+    evaluate_model(model, X, y, X_test, y_test, graph_name)
+
+G_citation = nx.read_edgelist("Cit-HepPh.txt", comments="#", nodetype=int)
+G_collab = nx.read_edgelist("ca-HepPh.txt.gz", comments="#", nodetype=int)
+
+link_prediction_decision_tree(G_citation, "Citation network dataset")
+link_prediction_decision_tree(G_collab, "Collaboration network dataset")
