@@ -114,14 +114,6 @@ Implement your changes with appropriate tests
 Commit changes (git commit -m 'Add feature: description')
 Push to branch (git push origin feature/enhancement)
 Create a Pull Request
-# Citation
-If you use this code in your research, please cite:
-bibtex@software{link_prediction_impact_ranking,
-  title={Graph-Based Link Prediction and Academic Impact Ranking},
-  author={Your Name},
-  year={2025},
-  url={https://github.com/yourusername/link-prediction-impact-ranking}
-}
 # License
 This project is licensed under the MIT License - see the LICENSE file for details.
 # Important Notes
